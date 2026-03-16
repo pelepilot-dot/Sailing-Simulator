@@ -285,22 +285,22 @@ export default function App() {
       <canvas ref={canvasRef} className="block w-full h-full" />
       
       {/* UI Overlay */}
-      <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/50 pointer-events-none">
-        <div className="text-3xl font-black text-sky-900">คะแนน: {uiState.score}</div>
-        <div className="text-sm font-medium text-sky-700 mt-1">เป้าหมาย: แล่นเรือไปเก็บทุ่นสีแดง</div>
+      <div className="absolute top-2 left-2 sm:top-4 sm:left-4 bg-white/90 backdrop-blur-md p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 pointer-events-none">
+        <div className="text-xl sm:text-3xl font-black text-sky-900">คะแนน: {uiState.score}</div>
+        <div className="hidden sm:block text-sm font-medium text-sky-700 mt-1">เป้าหมาย: แล่นเรือไปเก็บทุ่นสีแดง</div>
       </div>
 
       {/* Wind Indicator */}
-      <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/50 flex flex-col items-center w-32 pointer-events-none">
-        <span className="text-sm font-bold text-slate-700 mb-2">ทิศทางลม</span>
-        <div className="relative w-16 h-16 rounded-full border-4 border-sky-200 flex items-center justify-center bg-sky-50 shadow-inner">
+      <div className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-white/90 backdrop-blur-md p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 flex flex-col items-center w-24 sm:w-32 pointer-events-none">
+        <span className="text-[10px] sm:text-sm font-bold text-slate-700 mb-1 sm:mb-2">ทิศทางลม</span>
+        <div className="relative w-10 h-10 sm:w-16 sm:h-16 rounded-full border-2 sm:border-4 border-sky-200 flex items-center justify-center bg-sky-50 shadow-inner">
           <Navigation 
-            className="w-8 h-8 text-sky-500 transition-transform duration-200" 
+            className="w-5 h-5 sm:w-8 sm:h-8 text-sky-500 transition-transform duration-200" 
             style={{ transform: `rotate(${uiState.windDir + 90}deg)` }} 
             fill="currentColor"
           />
         </div>
-        <span className="text-xs font-bold text-slate-500 mt-2">
+        <span className="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 sm:mt-2">
           {(uiState.speed * 2).toFixed(1)} knots
         </span>
       </div>
@@ -314,59 +314,63 @@ export default function App() {
       )}
 
       {/* Controls - Bottom */}
-      <div className="absolute bottom-6 left-6 flex gap-4">
-        <button 
-          className="w-20 h-20 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform border border-slate-200 select-none touch-manipulation"
-          onPointerDown={() => keys.current['ArrowLeft'] = true}
-          onPointerUp={() => keys.current['ArrowLeft'] = false}
-          onPointerLeave={() => keys.current['ArrowLeft'] = false}
-        >
-          <RotateCcw className="w-10 h-10 text-slate-700" />
-        </button>
-        <button 
-          className="w-20 h-20 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform border border-slate-200 select-none touch-manipulation"
-          onPointerDown={() => keys.current['ArrowRight'] = true}
-          onPointerUp={() => keys.current['ArrowRight'] = false}
-          onPointerLeave={() => keys.current['ArrowRight'] = false}
-        >
-          <RotateCcw className="w-10 h-10 text-slate-700 scale-x-[-1]" />
-        </button>
-      </div>
-
-      <div className="absolute bottom-6 right-6 bg-white/90 backdrop-blur-md p-5 rounded-3xl shadow-xl border border-slate-200 w-64">
-        <div className="flex justify-between items-end mb-3">
-          <span className="text-base font-bold text-slate-800">ปรับใบเรือ (Trim)</span>
-          <span className="text-sm font-bold text-sky-600">{uiState.sailTrim.toFixed(0)}°</span>
-        </div>
-        
-        <input 
-          type="range" 
-          min="0" max="90" 
-          value={uiState.sailTrim}
-          onChange={(e) => {
-            gameState.current.boat.sailTrim = Number(e.target.value);
-            setUiState(prev => ({...prev, sailTrim: Number(e.target.value)}));
-          }}
-          className="w-full h-3 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500 touch-manipulation"
-        />
-        <div className="flex justify-between w-full text-xs font-bold text-slate-500 mt-2">
-          <span>ดึงเข้า (0°)</span>
-          <span>ปล่อยออก (90°)</span>
+      <div className="absolute bottom-4 left-2 right-2 sm:bottom-6 sm:left-6 sm:right-6 flex justify-between items-end pointer-events-none">
+        {/* Steering */}
+        <div className="flex gap-2 sm:gap-4 pointer-events-auto">
+          <button 
+            className="w-16 h-16 sm:w-20 sm:h-20 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform border border-slate-200 select-none touch-manipulation"
+            onPointerDown={() => keys.current['ArrowLeft'] = true}
+            onPointerUp={() => keys.current['ArrowLeft'] = false}
+            onPointerLeave={() => keys.current['ArrowLeft'] = false}
+          >
+            <RotateCcw className="w-8 h-8 sm:w-10 sm:h-10 text-slate-700" />
+          </button>
+          <button 
+            className="w-16 h-16 sm:w-20 sm:h-20 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform border border-slate-200 select-none touch-manipulation"
+            onPointerDown={() => keys.current['ArrowRight'] = true}
+            onPointerUp={() => keys.current['ArrowRight'] = false}
+            onPointerLeave={() => keys.current['ArrowRight'] = false}
+          >
+            <RotateCcw className="w-8 h-8 sm:w-10 sm:h-10 text-slate-700 scale-x-[-1]" />
+          </button>
         </div>
 
-        {/* Efficiency Meter */}
-        <div className="mt-4 pt-4 border-t border-slate-100">
-          <div className="text-xs font-bold text-slate-600 mb-1 flex justify-between">
-            <span>ประสิทธิภาพใบเรือ</span>
-            <span className={uiState.efficiency > 0.8 ? 'text-green-600' : uiState.efficiency > 0.4 ? 'text-amber-600' : 'text-red-600'}>
-              {Math.round(uiState.efficiency * 100)}%
-            </span>
+        {/* Sail Trim */}
+        <div className="bg-white/90 backdrop-blur-md p-3 sm:p-5 rounded-2xl sm:rounded-3xl shadow-xl border border-slate-200 w-40 sm:w-64 pointer-events-auto">
+          <div className="flex justify-between items-end mb-2 sm:mb-3">
+            <span className="text-sm sm:text-base font-bold text-slate-800">ปรับใบเรือ</span>
+            <span className="text-xs sm:text-sm font-bold text-sky-600">{uiState.sailTrim.toFixed(0)}°</span>
           </div>
-          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-            <div 
-              className={`h-full transition-all duration-300 ${uiState.efficiency > 0.8 ? 'bg-green-500' : uiState.efficiency > 0.4 ? 'bg-amber-500' : 'bg-red-500'}`}
-              style={{ width: `${uiState.efficiency * 100}%` }}
-            />
+          
+          <input 
+            type="range" 
+            min="0" max="90" 
+            value={uiState.sailTrim}
+            onChange={(e) => {
+              gameState.current.boat.sailTrim = Number(e.target.value);
+              setUiState(prev => ({...prev, sailTrim: Number(e.target.value)}));
+            }}
+            className="w-full h-2 sm:h-3 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500 touch-manipulation"
+          />
+          <div className="flex justify-between w-full text-[10px] sm:text-xs font-bold text-slate-500 mt-1 sm:mt-2">
+            <span>ดึงเข้า</span>
+            <span>ปล่อยออก</span>
+          </div>
+
+          {/* Efficiency Meter */}
+          <div className="mt-2 sm:mt-4 pt-2 sm:pt-4 border-t border-slate-100">
+            <div className="text-[10px] sm:text-xs font-bold text-slate-600 mb-1 flex justify-between">
+              <span>ประสิทธิภาพ</span>
+              <span className={uiState.efficiency > 0.8 ? 'text-green-600' : uiState.efficiency > 0.4 ? 'text-amber-600' : 'text-red-600'}>
+                {Math.round(uiState.efficiency * 100)}%
+              </span>
+            </div>
+            <div className="w-full h-1.5 sm:h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+              <div 
+                className={`h-full transition-all duration-300 ${uiState.efficiency > 0.8 ? 'bg-green-500' : uiState.efficiency > 0.4 ? 'bg-amber-500' : 'bg-red-500'}`}
+                style={{ width: `${uiState.efficiency * 100}%` }}
+              />
+            </div>
           </div>
         </div>
       </div>
