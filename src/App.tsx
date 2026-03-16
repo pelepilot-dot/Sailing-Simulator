@@ -18,6 +18,8 @@ export default function App() {
     wind: { dir: 90, speed: 0.8 },
     target: { x: 0, y: -600 },
     score: 0,
+    startTime: 0,
+    elapsedTime: 0,
     particles: Array.from({ length: 60 }).map(() => ({
       x: Math.random() * 3000 - 1500,
       y: Math.random() * 3000 - 1500,
@@ -32,7 +34,8 @@ export default function App() {
     sailTrim: 45,
     windDir: 90,
     inIrons: false,
-    efficiency: 0
+    efficiency: 0,
+    timeStr: '00:00'
   });
 
   const [showInstructions, setShowInstructions] = useState(true);
@@ -76,6 +79,9 @@ export default function App() {
 
       const state = gameState.current;
       const { boat, wind, target, particles, wake } = state;
+
+      if (state.startTime === 0) state.startTime = performance.now();
+      state.elapsedTime = performance.now() - state.startTime;
 
       // Controls
       if (keys.current['ArrowLeft'] || keys.current['a']) boat.heading -= 2.5 * dt;
@@ -134,8 +140,10 @@ export default function App() {
       }
 
       // 5. Calculate Forces
-      const liftForce = CL * awSpeed * awSpeed * 0.015;
-      const dragForce = CD * awSpeed * awSpeed * 0.015;
+      const dynamicPressure = 0.5 * 1.225 * awSpeed * awSpeed * 0.05; // Scaled air density factor
+      const sailArea = 2.5;
+      const liftForce = CL * dynamicPressure * sailArea;
+      const dragForce = CD * dynamicPressure * sailArea;
 
       // Lift is perpendicular to apparent wind
       const liftDir = awDir - Math.sign(awa) * 90;
@@ -144,25 +152,53 @@ export default function App() {
       // Project forces onto boat's forward axis
       const liftForward = Math.cos((liftDir - boat.heading) * Math.PI / 180) * liftForce;
       const dragForward = Math.cos((dragDir - boat.heading) * Math.PI / 180) * dragForce;
+      
+      const liftLateral = Math.sin((liftDir - boat.heading) * Math.PI / 180) * liftForce;
+      const dragLateral = Math.sin((dragDir - boat.heading) * Math.PI / 180) * dragForce;
 
       const totalForwardForce = liftForward + dragForward;
+      const totalLateralForce = liftLateral + dragLateral;
 
       // 6. Update State
       let efficiency = isLuffing ? 0 : Math.max(0, CL / 1.6);
       const inIrons = Math.abs(awa) < 25 && boat.speed < 0.5;
 
+      // Heel Angle (Boat tilting)
+      const targetHeel = totalLateralForce * 12; // Tuning factor
+      (boat as any).heel = ((boat as any).heel || 0) + (targetHeel - ((boat as any).heel || 0)) * 0.1;
+      
+      // Leeway (Drift)
+      // Keel provides lateral resistance proportional to speed squared
+      const keelResistance = Math.max(0.5, boat.speed * boat.speed) * 0.15;
+      const targetLeeway = Math.atan2(totalLateralForce, keelResistance) * 180 / Math.PI * 0.15; // Dampened
+      (boat as any).leeway = ((boat as any).leeway || 0) + (targetLeeway - ((boat as any).leeway || 0)) * 0.1;
+
       // Acceleration and water drag
-      const waterDrag = boat.speed * boat.speed * 0.015 + boat.speed * 0.02;
+      // Hull speed limit (wave making drag increases exponentially)
+      const hullSpeed = 8.0;
+      const waveDrag = Math.pow(boat.speed / hullSpeed, 4) * 0.05;
+      const waterDrag = boat.speed * boat.speed * 0.015 + boat.speed * 0.02 + waveDrag;
+      
       boat.speed += (totalForwardForce - waterDrag) * dt;
       if (boat.speed < 0) boat.speed = 0;
 
-      boat.x += Math.cos(boat.heading * Math.PI / 180) * boat.speed * dt;
-      boat.y += Math.sin(boat.heading * Math.PI / 180) * boat.speed * dt;
+      // Actual course over ground (heading + leeway)
+      const cog = boat.heading + ((boat as any).leeway || 0);
+      boat.x += Math.cos(cog * Math.PI / 180) * boat.speed * dt;
+      boat.y += Math.sin(cog * Math.PI / 180) * boat.speed * dt;
 
       // Store for rendering
       (boat as any).actualSailAngle = actualSailAngle;
       (boat as any).isLuffing = isLuffing;
       (boat as any).aoa = aoa;
+      (boat as any).CL = CL;
+      (boat as any).CD = CD;
+      (boat as any).liftForce = liftForce;
+      (boat as any).dragForce = dragForce;
+      (boat as any).liftDir = liftDir;
+      (boat as any).dragDir = dragDir;
+      (boat as any).awDir = awDir;
+      (boat as any).awSpeed = awSpeed;
 
       // Target collision
       const dist = Math.hypot(target.x - boat.x, target.y - boat.y);
@@ -195,13 +231,18 @@ export default function App() {
 
       // Sync UI state every few frames to save performance
       if (Math.random() < 0.1) {
+        const totalSeconds = Math.floor(state.elapsedTime / 1000);
+        const mins = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+        const secs = (totalSeconds % 60).toString().padStart(2, '0');
+
         setUiState({
           score: state.score,
           speed: boat.speed,
           sailTrim: boat.sailTrim,
           windDir: wind.dir,
           inIrons,
-          efficiency
+          efficiency,
+          timeStr: `${mins}:${secs}`
         });
       }
 
@@ -272,8 +313,41 @@ export default function App() {
       // Boat
       ctx.save();
       ctx.translate(boat.x, boat.y);
-      ctx.rotate(boat.heading * Math.PI / 180);
+      
+      // Draw Global Vectors (True Wind, Apparent Wind, Boat Speed)
+      const drawVector = (angle: number, length: number, color: string, label: string) => {
+        if (length < 0.1) return;
+        ctx.save();
+        ctx.rotate(angle * Math.PI / 180);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(length, 0);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Arrowhead
+        ctx.beginPath();
+        ctx.moveTo(length, 0);
+        ctx.lineTo(length - 8, -4);
+        ctx.lineTo(length - 8, 4);
+        ctx.fillStyle = color;
+        ctx.fill();
+        // Label
+        ctx.translate(length + 10, 0);
+        ctx.rotate(-angle * Math.PI / 180); // Keep text upright
+        ctx.fillStyle = color;
+        ctx.font = '10px sans-serif';
+        ctx.fillText(label, -5, 4);
+        ctx.restore();
+      };
 
+      // Draw Wind Vectors around the boat
+      drawVector(state.wind.dir, state.wind.speed * 50, 'rgba(56, 189, 248, 0.6)', 'TW'); // True Wind (sky-400)
+      drawVector((boat as any).awDir || 0, ((boat as any).awSpeed || 0) * 50, 'rgba(14, 165, 233, 0.8)', 'AW'); // Apparent Wind (sky-500)
+      drawVector(boat.heading, boat.speed * 10, 'rgba(148, 163, 184, 0.8)', 'BS'); // Boat Speed (slate-400)
+
+      ctx.rotate(boat.heading * Math.PI / 180);
+      
       // Hull (Enlarged and curved)
       ctx.fillStyle = '#f8fafc';
       ctx.beginPath();
@@ -341,17 +415,120 @@ export default function App() {
         ctx.lineWidth = 2;
         ctx.stroke();
         
-        // Draw airflow lines (Lift visualization)
-        if (aoa <= 25 && boat.speed > 0.5) {
-            ctx.beginPath();
-            ctx.moveTo(-40, belly * 1.4);
-            ctx.lineTo(-40, belly * 1.4 + Math.sign(belly) * 20);
-            ctx.strokeStyle = 'rgba(14, 165, 233, 0.6)'; // sky-500
-            ctx.lineWidth = 3;
-            ctx.stroke();
+        // Draw Lift Force Vectors (Green arrows) & Airflow
+        const CL = (boat as any).CL || 0; 
+        const liftMag = Math.max(8, CL * 30); // Scale arrow length, minimum 8
+        const sign = Math.sign(actualSailAngle || 1);
+        
+        // Lift Arrows on Sail Surface
+        ctx.strokeStyle = aoa > 25 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.9)'; // red-500 if stalled, else green-500
+        ctx.fillStyle = aoa > 25 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.9)';
+        ctx.lineWidth = 2.5;
+        
+        [-20, -45, -70].forEach(x => {
+          const normalizedX = (x + 42.5) / 42.5; 
+          const y = (1 - normalizedX * normalizedX) * belly * 1.2; 
+          const startY = y + sign * 4;
+          const endY = startY + sign * liftMag;
+          
+          ctx.beginPath();
+          ctx.moveTo(x, startY);
+          ctx.lineTo(x, endY);
+          ctx.stroke();
+          
+          ctx.beginPath();
+          ctx.moveTo(x, endY + sign * 2);
+          ctx.lineTo(x - 4, endY - sign * 5);
+          ctx.lineTo(x + 4, endY - sign * 5);
+          ctx.fill();
+        });
+
+        // Airflow lines
+        ctx.strokeStyle = aoa > 25 ? 'rgba(239, 68, 68, 0.3)' : 'rgba(14, 165, 233, 0.5)'; // red if stalled, else sky-500
+        ctx.lineWidth = 1.5;
+        
+        ctx.beginPath();
+        ctx.moveTo(10, sign * 15);
+        if (aoa > 25) {
+          // Turbulent airflow if stalled
+          ctx.quadraticCurveTo(-35, belly * 3.0, -80, sign * 30);
+        } else {
+          // Smooth airflow
+          ctx.quadraticCurveTo(-35, belly * 2.2, -100, sign * 5);
         }
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.moveTo(10, sign * 25);
+        if (aoa > 25) {
+          // Turbulent airflow if stalled
+          ctx.quadraticCurveTo(-35, belly * 4.0, -70, sign * 40);
+        } else {
+          // Smooth airflow
+          ctx.quadraticCurveTo(-35, belly * 3.0, -100, sign * 15);
+        }
+        ctx.stroke();
       }
       
+      // Draw Aerodynamic Force Vectors from Center of Effort (CE)
+      if (!isLuffing && boat.speed > 0.1) {
+        ctx.save();
+        ctx.translate(-40, 0); // Center of Effort (approx middle of sail)
+        
+        // Un-rotate sail angle, then un-rotate boat heading to draw in global space
+        ctx.rotate(-actualSailAngle * Math.PI / 180);
+        ctx.rotate(-boat.heading * Math.PI / 180);
+        
+        const liftF = (boat as any).liftForce || 0;
+        const dragF = (boat as any).dragForce || 0;
+        const liftD = (boat as any).liftDir || 0;
+        const dragD = (boat as any).dragDir || 0;
+        
+        const scaleF = 20; // Visual scale for force vectors
+        
+        // Helper to draw force vector
+        const drawForce = (dir: number, mag: number, color: string, label: string) => {
+          if (mag < 0.1) return;
+          const len = mag * scaleF;
+          ctx.save();
+          ctx.rotate(dir * Math.PI / 180);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(len, 0);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          // Arrowhead
+          ctx.beginPath();
+          ctx.moveTo(len, 0);
+          ctx.lineTo(len - 6, -4);
+          ctx.lineTo(len - 6, 4);
+          ctx.fillStyle = color;
+          ctx.fill();
+          // Label
+          ctx.translate(len + 8, 0);
+          ctx.rotate(-dir * Math.PI / 180);
+          ctx.fillStyle = color;
+          ctx.font = 'bold 10px sans-serif';
+          ctx.fillText(label, -5, 4);
+          ctx.restore();
+        };
+
+        // Draw Lift (Green)
+        drawForce(liftD, liftF, 'rgba(34, 197, 94, 0.9)', 'LIFT');
+        // Draw Drag (Red)
+        drawForce(dragD, dragF, 'rgba(239, 68, 68, 0.9)', 'DRAG');
+        
+        // Draw Total Aerodynamic Force (Yellow)
+        const totalX = Math.cos(liftD * Math.PI / 180) * liftF + Math.cos(dragD * Math.PI / 180) * dragF;
+        const totalY = Math.sin(liftD * Math.PI / 180) * liftF + Math.sin(dragD * Math.PI / 180) * dragF;
+        const totalDir = Math.atan2(totalY, totalX) * 180 / Math.PI;
+        const totalMag = Math.hypot(totalX, totalY);
+        drawForce(totalDir, totalMag, 'rgba(234, 179, 8, 0.9)', 'TOTAL');
+        
+        ctx.restore();
+      }
+
       ctx.restore(); // end sail
       ctx.restore(); // end boat
 
@@ -398,15 +575,25 @@ export default function App() {
         <div className="hidden sm:block text-sm font-medium text-sky-700 mt-1">เป้าหมาย: แล่นเรือไปเก็บทุ่นสีแดง</div>
       </div>
 
-      {/* Wind Indicator */}
-      <div className="absolute sm:top-4 sm:right-4 bg-white/90 backdrop-blur-md p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 flex flex-col items-center w-32 sm:w-40 pointer-events-auto" style={{ top: 'max(0.5rem, env(safe-area-inset-top))', right: 'max(0.5rem, env(safe-area-inset-right))' }}>
-        <div className="flex justify-between w-full items-center mb-1 sm:mb-2">
-          <span className="text-[10px] sm:text-sm font-bold text-slate-700">ทิศทางลม</span>
-          <span className="text-[10px] sm:text-sm font-bold text-sky-600">{Math.round((uiState.windDir % 360 + 360) % 360)}°</span>
+      {/* Top Center: Credit & Timer */}
+      <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10" style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}>
+        <div className="text-[10px] sm:text-xs font-bold text-white drop-shadow-md mb-1 bg-black/20 px-3 py-0.5 rounded-full backdrop-blur-sm">
+          by พ.ท.ศักรินทร์ จรศรี
         </div>
-        <div className="relative w-10 h-10 sm:w-16 sm:h-16 rounded-full border-2 sm:border-4 border-sky-200 flex items-center justify-center bg-sky-50 shadow-inner mb-2 sm:mb-3">
+        <div className="bg-white/90 backdrop-blur-md px-4 py-1 sm:py-2 rounded-full shadow-lg border border-white/50">
+          <span className="text-lg sm:text-2xl font-black text-slate-800 font-mono tracking-wider">{uiState.timeStr}</span>
+        </div>
+      </div>
+
+      {/* Wind Indicator */}
+      <div className="absolute sm:top-4 sm:right-4 bg-white/90 backdrop-blur-md p-2 sm:p-3 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 flex flex-col items-center w-24 sm:w-32 pointer-events-auto" style={{ top: 'max(0.5rem, env(safe-area-inset-top))', right: 'max(0.5rem, env(safe-area-inset-right))' }}>
+        <div className="flex justify-between w-full items-center mb-1">
+          <span className="text-[9px] sm:text-xs font-bold text-slate-700">ทิศทางลม</span>
+          <span className="text-[9px] sm:text-xs font-bold text-sky-600">{Math.round((uiState.windDir % 360 + 360) % 360)}°</span>
+        </div>
+        <div className="relative w-8 h-8 sm:w-12 sm:h-12 rounded-full border-2 sm:border-[3px] border-sky-200 flex items-center justify-center bg-sky-50 shadow-inner mb-1 sm:mb-2">
           <Navigation 
-            className="w-5 h-5 sm:w-8 sm:h-8 text-sky-500 transition-transform duration-200" 
+            className="w-4 h-4 sm:w-6 sm:h-6 text-sky-500 transition-transform duration-200" 
             style={{ transform: `rotate(${uiState.windDir + 90}deg)` }} 
             fill="currentColor"
           />
@@ -421,7 +608,7 @@ export default function App() {
           }}
           className="w-full h-1.5 sm:h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500 touch-manipulation"
         />
-        <span className="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 sm:mt-2">
+        <span className="text-[9px] sm:text-[10px] font-bold text-slate-500 mt-1">
           {(uiState.speed * 2).toFixed(1)} knots
         </span>
       </div>
