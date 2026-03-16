@@ -45,8 +45,13 @@ export default function App() {
     
     const handleResize = () => {
       if (canvasRef.current) {
-        canvasRef.current.width = window.innerWidth;
-        canvasRef.current.height = window.innerHeight;
+        const dpr = window.devicePixelRatio || 1;
+        canvasRef.current.width = window.innerWidth * dpr;
+        canvasRef.current.height = window.innerHeight * dpr;
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          ctx.scale(dpr, dpr);
+        }
       }
     };
     window.addEventListener('resize', handleResize);
@@ -106,7 +111,7 @@ export default function App() {
         const distance = 800 + Math.random() * 700;
         target.x = boat.x + Math.cos(angle) * distance;
         target.y = boat.y + Math.sin(angle) * distance;
-        wind.dir = normalizeAngle(wind.dir + (Math.random() * 40 - 20));
+        // Removed random wind change so user has full control
       }
 
       // Update particles
@@ -149,27 +154,30 @@ export default function App() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
       const state = gameState.current;
       const { boat, target, particles, wake } = state;
 
       // Clear & Background
       ctx.fillStyle = '#0ea5e9'; // sky-500
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, width, height);
 
       ctx.save();
-      ctx.translate(canvas.width / 2 - boat.x, canvas.height / 2 - boat.y);
+      ctx.translate(width / 2 - boat.x, height / 2 - boat.y);
 
       // Grid
       ctx.strokeStyle = 'rgba(255,255,255,0.1)';
       ctx.lineWidth = 1;
       const gridSize = 200;
-      const startX = Math.floor((boat.x - canvas.width/2) / gridSize) * gridSize;
-      const startY = Math.floor((boat.y - canvas.height/2) / gridSize) * gridSize;
-      for (let x = startX; x < boat.x + canvas.width/2; x += gridSize) {
-        ctx.beginPath(); ctx.moveTo(x, boat.y - canvas.height/2); ctx.lineTo(x, boat.y + canvas.height/2); ctx.stroke();
+      const startX = Math.floor((boat.x - width/2) / gridSize) * gridSize;
+      const startY = Math.floor((boat.y - height/2) / gridSize) * gridSize;
+      for (let x = startX; x < boat.x + width/2; x += gridSize) {
+        ctx.beginPath(); ctx.moveTo(x, boat.y - height/2); ctx.lineTo(x, boat.y + height/2); ctx.stroke();
       }
-      for (let y = startY; y < boat.y + canvas.height/2; y += gridSize) {
-        ctx.beginPath(); ctx.moveTo(boat.x - canvas.width/2, y); ctx.lineTo(boat.x + canvas.width/2, y); ctx.stroke();
+      for (let y = startY; y < boat.y + height/2; y += gridSize) {
+        ctx.beginPath(); ctx.moveTo(boat.x - width/2, y); ctx.lineTo(boat.x + width/2, y); ctx.stroke();
       }
 
       // Wake
@@ -259,7 +267,7 @@ export default function App() {
 
       // Off-screen Target Pointer
       const distToTarget = Math.hypot(target.x - boat.x, target.y - boat.y);
-      if (distToTarget > Math.min(canvas.width, canvas.height) / 2 - 50) {
+      if (distToTarget > Math.min(width, height) / 2 - 50) {
         const angleToTarget = Math.atan2(target.y - boat.y, target.x - boat.x);
         ctx.save();
         ctx.translate(boat.x, boat.y);
@@ -281,25 +289,38 @@ export default function App() {
   }, [showInstructions]);
 
   return (
-    <div className="fixed inset-0 overflow-hidden touch-none bg-sky-500 font-sans">
+    <div className="fixed inset-0 w-full h-[100dvh] overflow-hidden touch-none bg-sky-500 font-sans select-none">
       <canvas ref={canvasRef} className="block w-full h-full" />
       
       {/* UI Overlay */}
-      <div className="absolute top-2 left-2 sm:top-4 sm:left-4 bg-white/90 backdrop-blur-md p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 pointer-events-none">
+      <div className="absolute sm:top-4 sm:left-4 bg-white/90 backdrop-blur-md p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 pointer-events-none" style={{ top: 'max(0.5rem, env(safe-area-inset-top))', left: 'max(0.5rem, env(safe-area-inset-left))' }}>
         <div className="text-xl sm:text-3xl font-black text-sky-900">คะแนน: {uiState.score}</div>
         <div className="hidden sm:block text-sm font-medium text-sky-700 mt-1">เป้าหมาย: แล่นเรือไปเก็บทุ่นสีแดง</div>
       </div>
 
       {/* Wind Indicator */}
-      <div className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-white/90 backdrop-blur-md p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 flex flex-col items-center w-24 sm:w-32 pointer-events-none">
-        <span className="text-[10px] sm:text-sm font-bold text-slate-700 mb-1 sm:mb-2">ทิศทางลม</span>
-        <div className="relative w-10 h-10 sm:w-16 sm:h-16 rounded-full border-2 sm:border-4 border-sky-200 flex items-center justify-center bg-sky-50 shadow-inner">
+      <div className="absolute sm:top-4 sm:right-4 bg-white/90 backdrop-blur-md p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 flex flex-col items-center w-32 sm:w-40 pointer-events-auto" style={{ top: 'max(0.5rem, env(safe-area-inset-top))', right: 'max(0.5rem, env(safe-area-inset-right))' }}>
+        <div className="flex justify-between w-full items-center mb-1 sm:mb-2">
+          <span className="text-[10px] sm:text-sm font-bold text-slate-700">ทิศทางลม</span>
+          <span className="text-[10px] sm:text-sm font-bold text-sky-600">{Math.round((uiState.windDir % 360 + 360) % 360)}°</span>
+        </div>
+        <div className="relative w-10 h-10 sm:w-16 sm:h-16 rounded-full border-2 sm:border-4 border-sky-200 flex items-center justify-center bg-sky-50 shadow-inner mb-2 sm:mb-3">
           <Navigation 
             className="w-5 h-5 sm:w-8 sm:h-8 text-sky-500 transition-transform duration-200" 
             style={{ transform: `rotate(${uiState.windDir + 90}deg)` }} 
             fill="currentColor"
           />
         </div>
+        <input 
+          type="range" 
+          min="0" max="359" 
+          value={Math.round((uiState.windDir % 360 + 360) % 360)}
+          onChange={(e) => {
+            gameState.current.wind.dir = Number(e.target.value);
+            setUiState(prev => ({...prev, windDir: Number(e.target.value)}));
+          }}
+          className="w-full h-1.5 sm:h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500 touch-manipulation"
+        />
         <span className="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 sm:mt-2">
           {(uiState.speed * 2).toFixed(1)} knots
         </span>
@@ -314,7 +335,7 @@ export default function App() {
       )}
 
       {/* Controls - Bottom */}
-      <div className="absolute bottom-4 left-2 right-2 sm:bottom-6 sm:left-6 sm:right-6 flex justify-between items-end pointer-events-none">
+      <div className="absolute sm:bottom-6 sm:left-6 sm:right-6 flex justify-between items-end pointer-events-none" style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))', left: 'max(0.5rem, env(safe-area-inset-left))', right: 'max(0.5rem, env(safe-area-inset-right))' }}>
         {/* Steering */}
         <div className="flex gap-2 sm:gap-4 pointer-events-auto">
           <button 
@@ -377,8 +398,8 @@ export default function App() {
 
       {/* Instructions Modal */}
       {showInstructions && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-100">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" style={{ paddingBottom: 'env(safe-area-inset-bottom)', paddingTop: 'env(safe-area-inset-top)' }}>
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 max-h-full overflow-y-auto">
             <h2 className="text-3xl font-black mb-6 text-slate-800 text-center">Sailing Simulator ⛵</h2>
             <ul className="space-y-4 text-slate-600 mb-8 font-medium">
               <li className="flex items-start gap-3">
@@ -387,7 +408,7 @@ export default function App() {
               </li>
               <li className="flex items-start gap-3">
                 <span className="text-xl">💨</span>
-                <span><strong>ทิศทางลม:</strong> สังเกตลูกศรลมที่มุมขวาบน ลมจะพัดไปตามทิศทางนั้น</span>
+                <span><strong>ทิศทางลม:</strong> สังเกตลูกศรลมที่มุมขวาบน คุณสามารถเลื่อนแถบเพื่อเปลี่ยนทิศทางลมได้เอง</span>
               </li>
               <li className="flex items-start gap-3">
                 <span className="text-xl">🧭</span>
