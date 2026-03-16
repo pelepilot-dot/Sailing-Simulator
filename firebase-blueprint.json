@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile data",
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "description": "The user's display name"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "The user's email address"
+        },
+        "photoURL": {
+          "type": "string",
+          "format": "uri",
+          "description": "The user's profile photo URL"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "user"],
+          "description": "The user's role"
+        }
+      },
+      "required": ["displayName", "email", "role"]
+    },
+    "Score": {
+      "title": "Score",
+      "description": "A completed race time",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The ID of the user who achieved this score"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The display name of the user"
+        },
+        "time": {
+          "type": "number",
+          "description": "The time taken to complete the race in seconds"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the score was recorded"
+        }
+      },
+      "required": ["userId", "displayName", "time", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Stores user profiles"
+    },
+    "/scores/{scoreId}": {
+      "schema": {
+        "$ref": "#/entities/Score"
+      },
+      "description": "Stores race completion times"
+    }
+  }
+}

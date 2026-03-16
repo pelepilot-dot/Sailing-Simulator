@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Navigation, RotateCcw } from 'lucide-react';
+import { Navigation, RotateCcw, Trophy, LogIn, LogOut } from 'lucide-react';
+import { auth, db } from './firebase';
+import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User, signInAnonymously } from 'firebase/auth';
+import { collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
 const normalizeAngle = (a: number) => {
   let res = a % 360;
@@ -8,10 +11,17 @@ const normalizeAngle = (a: number) => {
   return res;
 };
 
+const GAME_DURATION = 120000; // 2 minutes in ms
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>(0);
   const keys = useRef<Record<string, boolean>>({});
+  
+  const [user, setUser] = useState<User | null>(null);
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [playerName, setPlayerName] = useState('');
   
   const gameState = useRef({
     boat: { x: 0, y: 0, heading: -90, speed: 0, sailTrim: 45 },
@@ -25,7 +35,8 @@ export default function App() {
       y: Math.random() * 3000 - 1500,
       speed: Math.random() * 0.5 + 0.5
     })),
-    wake: [] as Array<{x: number, y: number, age: number}>
+    wake: [] as Array<{x: number, y: number, age: number}>,
+    playerName: ''
   });
 
   const [uiState, setUiState] = useState({
@@ -35,10 +46,98 @@ export default function App() {
     windDir: 90,
     inIrons: false,
     efficiency: 0,
-    timeStr: '00:00'
+    timeStr: '02:00',
+    gameOver: false
   });
 
   const [showInstructions, setShowInstructions] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser && currentUser.displayName && !currentUser.isAnonymous) {
+        setPlayerName(currentUser.displayName);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'scores'), orderBy('score', 'desc'), limit(10));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const scoresData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setLeaderboard(scoresData);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Login error:", error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
+
+  const saveScore = async (finalScore: number, name: string) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser || finalScore === 0 || isSaving) return;
+    setIsSaving(true);
+    try {
+      await addDoc(collection(db, 'scores'), {
+        userId: currentUser.uid,
+        displayName: name || 'Anonymous Sailor',
+        score: finalScore,
+        createdAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Error saving score:", error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const startGame = async () => {
+    if (!playerName.trim()) {
+      alert('กรุณากรอกชื่อเล่นก่อนเริ่มเกมครับ');
+      return;
+    }
+
+    if (!auth.currentUser) {
+      try {
+        await signInAnonymously(auth);
+      } catch (error) {
+        console.error("Anonymous auth error:", error);
+      }
+    }
+
+    gameState.current = {
+      boat: { x: 0, y: 0, heading: -90, speed: 0, sailTrim: 45 },
+      wind: { dir: 90, speed: 0.8 },
+      target: { x: 0, y: -600 },
+      score: 0,
+      startTime: performance.now(),
+      elapsedTime: 0,
+      particles: Array.from({ length: 60 }).map(() => ({
+        x: Math.random() * 3000 - 1500,
+        y: Math.random() * 3000 - 1500,
+        speed: Math.random() * 0.5 + 0.5
+      })),
+      wake: [] as Array<{x: number, y: number, age: number}>,
+      playerName: playerName.trim()
+    };
+    setUiState(prev => ({ ...prev, gameOver: false, score: 0, timeStr: '02:00' }));
+    setShowInstructions(false);
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => { keys.current[e.key] = true; };
@@ -82,6 +181,16 @@ export default function App() {
 
       if (state.startTime === 0) state.startTime = performance.now();
       state.elapsedTime = performance.now() - state.startTime;
+
+      const remainingTime = Math.max(0, GAME_DURATION - state.elapsedTime);
+      
+      if (remainingTime <= 0 && !uiState.gameOver) {
+        setUiState(prev => ({ ...prev, gameOver: true, timeStr: '00:00' }));
+        saveScore(state.score, state.playerName);
+        return;
+      }
+
+      if (uiState.gameOver) return;
 
       // Controls
       if (keys.current['ArrowLeft'] || keys.current['a']) boat.heading -= 2.5 * dt;
@@ -231,11 +340,12 @@ export default function App() {
 
       // Sync UI state every few frames to save performance
       if (Math.random() < 0.1) {
-        const totalSeconds = Math.floor(state.elapsedTime / 1000);
+        const totalSeconds = Math.ceil(remainingTime / 1000);
         const mins = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
         const secs = (totalSeconds % 60).toString().padStart(2, '0');
 
-        setUiState({
+        setUiState(prev => ({
+          ...prev,
           score: state.score,
           speed: boat.speed,
           sailTrim: boat.sailTrim,
@@ -243,7 +353,7 @@ export default function App() {
           inIrons,
           efficiency,
           timeStr: `${mins}:${secs}`
-        });
+        }));
       }
 
       draw();
@@ -571,6 +681,7 @@ export default function App() {
       
       {/* UI Overlay */}
       <div className="absolute sm:top-4 sm:left-4 bg-white/90 backdrop-blur-md p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-lg border border-white/50 pointer-events-none" style={{ top: 'max(0.5rem, env(safe-area-inset-top))', left: 'max(0.5rem, env(safe-area-inset-left))' }}>
+        <div className="text-sm font-bold text-slate-500 mb-1">กัปตัน: <span className="text-sky-600">{gameState.current.playerName}</span></div>
         <div className="text-xl sm:text-3xl font-black text-sky-900">คะแนน: {uiState.score}</div>
         <div className="hidden sm:block text-sm font-medium text-sky-700 mt-1">เป้าหมาย: แล่นเรือไปเก็บทุ่นสีแดง</div>
       </div>
@@ -687,11 +798,37 @@ export default function App() {
       {showInstructions && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" style={{ paddingBottom: 'env(safe-area-inset-bottom)', paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 max-h-full overflow-y-auto">
-            <h2 className="text-3xl font-black mb-6 text-slate-800 text-center">Sailing Simulator ⛵</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-3xl font-black text-slate-800">Sailing Simulator ⛵</h2>
+              {user && !user.isAnonymous ? (
+                <button onClick={handleLogout} className="text-slate-500 hover:text-slate-700 flex flex-col items-center">
+                  <img src={user.photoURL || ''} alt="Profile" className="w-8 h-8 rounded-full mb-1" />
+                  <span className="text-[10px] font-bold">ออกระบบ</span>
+                </button>
+              ) : (
+                <button onClick={handleLogin} className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-xl flex items-center gap-2 transition-colors">
+                  <LogIn className="w-4 h-4" />
+                  <span className="text-xs font-bold">ล็อกอิน</span>
+                </button>
+              )}
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-bold text-slate-700 mb-2">ชื่อกัปตันเรือ (Nickname) <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value)}
+                placeholder="กรอกชื่อเล่นของคุณ..."
+                className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-sky-500 focus:outline-none font-bold text-slate-700"
+                maxLength={20}
+              />
+            </div>
+            
             <ul className="space-y-4 text-slate-600 mb-8 font-medium">
               <li className="flex items-start gap-3">
-                <span className="text-xl">🎯</span>
-                <span><strong>เป้าหมาย:</strong> บังคับเรือไปเก็บทุ่นสีแดงให้ได้มากที่สุด</span>
+                <span className="text-xl">⏱️</span>
+                <span><strong>โหมดแข่งเวลา (Time Attack):</strong> คุณมีเวลา 2 นาทีในการเก็บทุ่นให้ได้มากที่สุด!</span>
               </li>
               <li className="flex items-start gap-3">
                 <span className="text-xl">💨</span>
@@ -705,17 +842,90 @@ export default function App() {
                 <span className="text-xl">🪢</span>
                 <span><strong>ใบเรือ (Airfoil):</strong> ปรับใบเรือให้ทำมุมรับลมพอดีเพื่อสร้าง "แรงยก (Lift)" สูงสุด หากดึงตึงเกินไปใบเรือจะ <strong>Stall (สีแดง)</strong> และสูญเสียความเร็ว</span>
               </li>
-              <li className="flex items-start gap-3">
-                <span className="text-xl">⚠️</span>
-                <span><strong>ระวัง:</strong> อย่าหันหัวเรือสวนลมตรงๆ (ทวนลม) เพราะเรือจะหยุดวิ่ง!</span>
-              </li>
             </ul>
+
+            {/* Leaderboard preview */}
+            <div className="mb-6 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <h3 className="text-sm font-black text-slate-700 mb-3 flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-amber-500" />
+                Top Sailors
+              </h3>
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                {leaderboard.length > 0 ? leaderboard.map((entry, idx) => (
+                  <div key={entry.id} className="flex justify-between items-center text-sm">
+                    <span className="font-bold text-slate-600 truncate pr-4">
+                      {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`} {entry.displayName}
+                    </span>
+                    <span className="font-black text-sky-600 shrink-0">{entry.score} pts</span>
+                  </div>
+                )) : (
+                  <div className="text-center text-slate-500 py-2 font-medium text-xs">ยังไม่มีสถิติ มาร่วมสร้างสถิติคนแรกกัน!</div>
+                )}
+              </div>
+            </div>
+
             <button 
-              onClick={() => setShowInstructions(false)}
-              className="w-full bg-sky-500 hover:bg-sky-600 text-white font-black text-lg py-4 rounded-2xl transition-colors shadow-lg shadow-sky-500/30 active:scale-95"
+              onClick={startGame}
+              disabled={!playerName.trim()}
+              className="w-full bg-sky-500 hover:bg-sky-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black text-lg py-4 rounded-2xl transition-colors shadow-lg shadow-sky-500/30 active:scale-95"
             >
-              เริ่มเกม! (Start)
+              เริ่มแข่ง! (Start Race)
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Game Over Modal */}
+      {uiState.gameOver && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 text-center animate-in zoom-in duration-300">
+            <Trophy className="w-16 h-16 text-amber-500 mx-auto mb-4" />
+            <h2 className="text-4xl font-black mb-2 text-slate-800">หมดเวลา!</h2>
+            <p className="text-slate-500 font-medium mb-6">คุณเก็บทุ่นไปได้ทั้งหมด</p>
+            
+            <div className="text-6xl font-black text-sky-500 mb-8 drop-shadow-sm">
+              {uiState.score} <span className="text-2xl text-sky-300">pts</span>
+            </div>
+
+            {!user || user.isAnonymous ? (
+              <div className="mb-6 p-4 bg-amber-50 rounded-2xl border border-amber-100 text-amber-800 text-sm font-medium">
+                <p className="mb-3">ล็อกอินด้วย Google เพื่อผูกสถิติกับบัญชีของคุณ!</p>
+                <button onClick={handleLogin} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-2 rounded-xl font-bold transition-colors flex items-center justify-center gap-2">
+                  <LogIn className="w-4 h-4" /> ล็อกอินด้วย Google
+                </button>
+              </div>
+            ) : null}
+
+            {leaderboard.length > 0 && (
+              <div className="mb-8 text-left bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                <h3 className="text-sm font-black text-slate-700 mb-3">Leaderboard</h3>
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                  {leaderboard.map((entry, idx) => (
+                    <div key={entry.id} className={`flex justify-between items-center text-sm p-2 rounded-lg ${entry.userId === user?.uid && entry.score === uiState.score ? 'bg-sky-100 border border-sky-200' : ''}`}>
+                      <span className="font-bold text-slate-600 truncate pr-4">
+                        {idx + 1}. {entry.displayName}
+                      </span>
+                      <span className="font-black text-sky-600 shrink-0">{entry.score} pts</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowInstructions(true)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-4 rounded-2xl transition-colors"
+              >
+                กลับหน้าแรก
+              </button>
+              <button 
+                onClick={startGame}
+                className="flex-1 bg-sky-500 hover:bg-sky-600 text-white font-black py-4 rounded-2xl transition-colors shadow-lg shadow-sky-500/30"
+              >
+                เล่นอีกครั้ง
+              </button>
+            </div>
           </div>
         </div>
       )}
