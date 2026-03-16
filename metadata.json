@@ -1,0 +1,5 @@
+{
+  "name": "Sailing Simulator",
+  "description": "เกมจำลองการเดินเรือใบ ให้ผู้เล่นปรับมุมใบเรือและทิศทางหัวเรือเพื่อแล่นไปเก็บทุ่น",
+  "requestFramePermissions": []
+}
