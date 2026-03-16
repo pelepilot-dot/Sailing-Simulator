@@ -85,27 +85,88 @@ export default function App() {
 
       boat.heading = normalizeAngle(boat.heading);
 
-      // Physics
-      const rawRelWind = normalizeAngle(wind.dir - boat.heading);
-      const relWind = Math.abs(rawRelWind);
+      // Physics (Aerodynamic Airfoil Model)
+      // 1. Calculate Apparent Wind
+      const boatVx = Math.cos(boat.heading * Math.PI / 180) * boat.speed;
+      const boatVy = Math.sin(boat.heading * Math.PI / 180) * boat.speed;
+      const windVx = Math.cos(wind.dir * Math.PI / 180) * wind.speed * 8; 
+      const windVy = Math.sin(wind.dir * Math.PI / 180) * wind.speed * 8;
       
-      const optimalTrim = (180 - relWind) / 2;
-      let efficiency = 1 - Math.abs(boat.sailTrim - optimalTrim) / 40;
-      efficiency = Math.max(0, Math.min(1, efficiency));
+      const awVx = windVx - boatVx;
+      const awVy = windVy - boatVy;
+      const awDir = Math.atan2(awVy, awVx) * 180 / Math.PI;
+      const awSpeed = Math.hypot(awVx, awVy);
 
-      const inIrons = relWind > 145;
-      const power = inIrons ? 0 : efficiency * wind.speed;
+      // Apparent Wind Angle relative to boat
+      const awa = normalizeAngle(awDir - boat.heading); 
+      
+      // 2. Determine Sail Angle
+      let actualSailAngle = 0;
+      let isLuffing = false;
+      
+      if (Math.abs(awa) <= boat.sailTrim) {
+        actualSailAngle = awa; // Sail flaps in the wind (luffing)
+        isLuffing = true;
+      } else {
+        actualSailAngle = Math.sign(awa) * boat.sailTrim; // Sail fills
+      }
 
-      // Acceleration and drag
-      boat.speed += (power * 0.1 * dt) - ((boat.speed * boat.speed * 0.002 + boat.speed * 0.015) * dt);
+      // 3. Calculate Angle of Attack (AoA)
+      const aoa = Math.abs(awa - actualSailAngle);
+
+      // 4. Aerodynamic Coefficients (Lift & Drag)
+      let CL = 0; 
+      let CD = 0.05; // Base parasitic drag
+
+      if (!isLuffing) {
+        if (aoa <= 25) {
+          // Attached flow (Lift generation)
+          CL = Math.sin(aoa * Math.PI / 180 * (90/25)) * 1.6; 
+          CD += 0.05 + Math.pow(aoa / 25, 2) * 0.15; // Induced drag
+        } else {
+          // Stalled (Separated flow)
+          CL = 1.6 * Math.cos((aoa - 25) * Math.PI / 180);
+          if (CL < 0) CL = 0;
+          CD += 0.2 + Math.pow((aoa - 25) / 65, 2) * 1.2; // High drag
+        }
+      } else {
+        CD = 0.02; // Flapping drag
+      }
+
+      // 5. Calculate Forces
+      const liftForce = CL * awSpeed * awSpeed * 0.015;
+      const dragForce = CD * awSpeed * awSpeed * 0.015;
+
+      // Lift is perpendicular to apparent wind
+      const liftDir = awDir - Math.sign(awa) * 90;
+      const dragDir = awDir;
+
+      // Project forces onto boat's forward axis
+      const liftForward = Math.cos((liftDir - boat.heading) * Math.PI / 180) * liftForce;
+      const dragForward = Math.cos((dragDir - boat.heading) * Math.PI / 180) * dragForce;
+
+      const totalForwardForce = liftForward + dragForward;
+
+      // 6. Update State
+      let efficiency = isLuffing ? 0 : Math.max(0, CL / 1.6);
+      const inIrons = Math.abs(awa) < 25 && boat.speed < 0.5;
+
+      // Acceleration and water drag
+      const waterDrag = boat.speed * boat.speed * 0.015 + boat.speed * 0.02;
+      boat.speed += (totalForwardForce - waterDrag) * dt;
       if (boat.speed < 0) boat.speed = 0;
 
       boat.x += Math.cos(boat.heading * Math.PI / 180) * boat.speed * dt;
       boat.y += Math.sin(boat.heading * Math.PI / 180) * boat.speed * dt;
 
+      // Store for rendering
+      (boat as any).actualSailAngle = actualSailAngle;
+      (boat as any).isLuffing = isLuffing;
+      (boat as any).aoa = aoa;
+
       // Target collision
       const dist = Math.hypot(target.x - boat.x, target.y - boat.y);
-      if (dist < 60) {
+      if (dist < 120) {
         state.score += 1;
         const angle = Math.random() * Math.PI * 2;
         const distance = 800 + Math.random() * 700;
@@ -170,7 +231,7 @@ export default function App() {
       // Grid
       ctx.strokeStyle = 'rgba(255,255,255,0.1)';
       ctx.lineWidth = 1;
-      const gridSize = 200;
+      const gridSize = 400;
       const startX = Math.floor((boat.x - width/2) / gridSize) * gridSize;
       const startY = Math.floor((boat.y - height/2) / gridSize) * gridSize;
       for (let x = startX; x < boat.x + width/2; x += gridSize) {
@@ -213,44 +274,83 @@ export default function App() {
       ctx.translate(boat.x, boat.y);
       ctx.rotate(boat.heading * Math.PI / 180);
 
-      // Hull
+      // Hull (Enlarged and curved)
       ctx.fillStyle = '#f8fafc';
       ctx.beginPath();
-      ctx.moveTo(25, 0);
-      ctx.lineTo(-20, 12);
-      ctx.lineTo(-20, -12);
+      ctx.moveTo(60, 0); // Bow
+      ctx.quadraticCurveTo(20, 22, -50, 22); // Starboard side
+      ctx.lineTo(-50, -22); // Stern
+      ctx.quadraticCurveTo(20, -22, 60, 0); // Port side
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#94a3b8';
+      
+      // Deck details
+      ctx.strokeStyle = '#cbd5e1';
       ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(40, 0);
+      ctx.lineTo(-40, 0);
+      ctx.stroke();
+      
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 3;
       ctx.stroke();
 
-      // Sail
-      const rawRelWind = normalizeAngle(state.wind.dir - boat.heading);
-      const actualSailAngle = Math.sign(rawRelWind || 1) * boat.sailTrim;
+      // Sail (Airfoil shape)
+      const actualSailAngle = (boat as any).actualSailAngle || 0;
+      const isLuffing = (boat as any).isLuffing || false;
+      const aoa = (boat as any).aoa || 0;
       
       ctx.save();
-      ctx.translate(5, 0); // Mast
+      ctx.translate(10, 0); // Mast position
       ctx.rotate(actualSailAngle * Math.PI / 180);
       
       // Boom
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(-35, 0);
+      ctx.lineTo(-85, 0);
       ctx.strokeStyle = '#78350f';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 4;
       ctx.stroke();
 
-      // Sail cloth
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      const belly = 15 * Math.sign(actualSailAngle || 1);
-      ctx.quadraticCurveTo(-15, belly, -35, 0);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.fill();
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      // Sail cloth (Airfoil)
+      if (isLuffing) {
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(-40, Math.sin(Date.now() / 100) * 15, -85, 0);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        const belly = 35 * Math.sign(actualSailAngle || 1);
+        // Leeward curve (more curved)
+        ctx.quadraticCurveTo(-35, belly * 1.3, -85, 0);
+        // Windward curve (less curved)
+        ctx.quadraticCurveTo(-35, belly * 0.8, 0, 0);
+        
+        // Color indicates lift/stall
+        if (aoa > 25) {
+          ctx.fillStyle = 'rgba(255, 200, 200, 0.9)'; // Stalled (reddish)
+        } else {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'; // Good lift
+        }
+        ctx.fill();
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Draw airflow lines (Lift visualization)
+        if (aoa <= 25 && boat.speed > 0.5) {
+            ctx.beginPath();
+            ctx.moveTo(-40, belly * 1.4);
+            ctx.lineTo(-40, belly * 1.4 + Math.sign(belly) * 20);
+            ctx.strokeStyle = 'rgba(14, 165, 233, 0.6)'; // sky-500
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+      }
       
       ctx.restore(); // end sail
       ctx.restore(); // end boat
@@ -416,7 +516,7 @@ export default function App() {
               </li>
               <li className="flex items-start gap-3">
                 <span className="text-xl">🪢</span>
-                <span><strong>ใบเรือ:</strong> ปรับความตึงใบเรือให้เหมาะสมกับทิศทางลม (ใช้แถบเลื่อน หรือ W/S) เพื่อให้เรือวิ่งเร็วที่สุด</span>
+                <span><strong>ใบเรือ (Airfoil):</strong> ปรับใบเรือให้ทำมุมรับลมพอดีเพื่อสร้าง "แรงยก (Lift)" สูงสุด หากดึงตึงเกินไปใบเรือจะ <strong>Stall (สีแดง)</strong> และสูญเสียความเร็ว</span>
               </li>
               <li className="flex items-start gap-3">
                 <span className="text-xl">⚠️</span>
