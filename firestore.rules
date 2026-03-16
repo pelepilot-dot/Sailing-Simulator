@@ -16,7 +16,6 @@ service cloud.firestore {
     // Collection: scores
     // Document ID: auto-generated
     // Fields:
-    //   - userId: string (required, matches auth.uid)
     //   - displayName: string (required, max 50 chars)
     //   - score: number (required, positive)
     //   - createdAt: timestamp (required)
@@ -69,13 +68,12 @@ service cloud.firestore {
     }
 
     function isValidScore(data) {
-      let allowedFields = ['userId', 'displayName', 'score', 'createdAt'];
+      let allowedFields = ['displayName', 'score', 'createdAt'];
       let hasRequired = hasRequiredFields(allowedFields);
-      let validUserId = data.userId is string && data.userId == request.auth.uid;
       let validName = data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 50;
       let validScore = data.score is number && data.score > 0;
       let validDate = data.createdAt is timestamp;
-      return hasOnlyAllowedFields(allowedFields) && hasRequired && validUserId && validName && validScore && validDate;
+      return hasOnlyAllowedFields(allowedFields) && hasRequired && validName && validScore && validDate;
     }
 
     // ===============================================================
@@ -91,7 +89,7 @@ service cloud.firestore {
 
     match /scores/{scoreId} {
       allow read: if true; // Public leaderboard
-      allow create: if isAuthenticated() && isValidScore(request.resource.data);
+      allow create: if isValidScore(request.resource.data);
       allow update: if false; // Scores are immutable
       allow delete: if isAdmin();
     }

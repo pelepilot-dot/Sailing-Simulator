@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Navigation, RotateCcw, Trophy, LogIn, LogOut } from 'lucide-react';
-import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User, signInAnonymously } from 'firebase/auth';
+import { Navigation, RotateCcw, Trophy } from 'lucide-react';
+import { db } from './firebase';
 import { collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
 const normalizeAngle = (a: number) => {
@@ -18,7 +17,6 @@ export default function App() {
   const animationRef = useRef<number>(0);
   const keys = useRef<Record<string, boolean>>({});
   
-  const [user, setUser] = useState<User | null>(null);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [playerName, setPlayerName] = useState('');
@@ -53,16 +51,6 @@ export default function App() {
   const [showInstructions, setShowInstructions] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (currentUser && currentUser.displayName && !currentUser.isAnonymous) {
-        setPlayerName(currentUser.displayName);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
     const q = query(collection(db, 'scores'), orderBy('score', 'desc'), limit(10));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const scoresData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -71,30 +59,11 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  const handleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Login error:", error);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
-  };
-
   const saveScore = async (finalScore: number, name: string) => {
-    const currentUser = auth.currentUser;
-    if (!currentUser || finalScore === 0 || isSaving) return;
+    if (finalScore === 0 || isSaving) return;
     setIsSaving(true);
     try {
       await addDoc(collection(db, 'scores'), {
-        userId: currentUser.uid,
         displayName: name || 'Anonymous Sailor',
         score: finalScore,
         createdAt: serverTimestamp()
@@ -110,14 +79,6 @@ export default function App() {
     if (!playerName.trim()) {
       alert('กรุณากรอกชื่อเล่นก่อนเริ่มเกมครับ');
       return;
-    }
-
-    if (!auth.currentUser) {
-      try {
-        await signInAnonymously(auth);
-      } catch (error) {
-        console.error("Anonymous auth error:", error);
-      }
     }
 
     gameState.current = {
@@ -798,19 +759,8 @@ export default function App() {
       {showInstructions && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" style={{ paddingBottom: 'env(safe-area-inset-bottom)', paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 max-h-full overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-center items-center mb-6">
               <h2 className="text-3xl font-black text-slate-800">Sailing Simulator ⛵</h2>
-              {user && !user.isAnonymous ? (
-                <button onClick={handleLogout} className="text-slate-500 hover:text-slate-700 flex flex-col items-center">
-                  <img src={user.photoURL || ''} alt="Profile" className="w-8 h-8 rounded-full mb-1" />
-                  <span className="text-[10px] font-bold">ออกระบบ</span>
-                </button>
-              ) : (
-                <button onClick={handleLogin} className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-xl flex items-center gap-2 transition-colors">
-                  <LogIn className="w-4 h-4" />
-                  <span className="text-xs font-bold">ล็อกอิน</span>
-                </button>
-              )}
             </div>
 
             <div className="mb-6">
@@ -887,21 +837,12 @@ export default function App() {
               {uiState.score} <span className="text-2xl text-sky-300">pts</span>
             </div>
 
-            {!user || user.isAnonymous ? (
-              <div className="mb-6 p-4 bg-amber-50 rounded-2xl border border-amber-100 text-amber-800 text-sm font-medium">
-                <p className="mb-3">ล็อกอินด้วย Google เพื่อผูกสถิติกับบัญชีของคุณ!</p>
-                <button onClick={handleLogin} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-2 rounded-xl font-bold transition-colors flex items-center justify-center gap-2">
-                  <LogIn className="w-4 h-4" /> ล็อกอินด้วย Google
-                </button>
-              </div>
-            ) : null}
-
             {leaderboard.length > 0 && (
               <div className="mb-8 text-left bg-slate-50 p-4 rounded-2xl border border-slate-100">
                 <h3 className="text-sm font-black text-slate-700 mb-3">Leaderboard</h3>
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
                   {leaderboard.map((entry, idx) => (
-                    <div key={entry.id} className={`flex justify-between items-center text-sm p-2 rounded-lg ${entry.userId === user?.uid && entry.score === uiState.score ? 'bg-sky-100 border border-sky-200' : ''}`}>
+                    <div key={entry.id} className={`flex justify-between items-center text-sm p-2 rounded-lg ${entry.displayName === playerName && entry.score === uiState.score ? 'bg-sky-100 border border-sky-200' : ''}`}>
                       <span className="font-bold text-slate-600 truncate pr-4">
                         {idx + 1}. {entry.displayName}
                       </span>
